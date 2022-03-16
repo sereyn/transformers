@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import datasets
-from datasets import load_dataset, load_metric
+from datasets import DatasetDict, load_dataset, load_metric, load_from_disk
 
 import transformers
 from trainer_qa import QuestionAnsweringTrainer
@@ -98,6 +98,9 @@ class DataTrainingArguments:
     )
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    dataset_path: Optional[str] = field(
+        default=None, metadata={"help": "Path to the dataset to use (if not using a dataset name)."}
     )
     train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a text file)."})
     validation_file: Optional[str] = field(
@@ -184,8 +187,9 @@ class DataTrainingArguments:
             and self.train_file is None
             and self.validation_file is None
             and self.test_file is None
+            and self.dataset_path is None
         ):
-            raise ValueError("Need either a dataset name or a training/validation file/test_file.")
+            raise ValueError("Need either a dataset name/path or a training/validation file/test_file.")
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
@@ -196,6 +200,8 @@ class DataTrainingArguments:
             if self.test_file is not None:
                 extension = self.test_file.split(".")[-1]
                 assert extension in ["csv", "json"], "`test_file` should be a csv or a json file."
+            if self.dataset_path is not None:
+                assert os.path.isdir(self.dataset_path), "`dataset_path` should be a directory."
 
 
 def main():
@@ -264,6 +270,19 @@ def main():
         raw_datasets = load_dataset(
             data_args.dataset_name, data_args.dataset_config_name, cache_dir=model_args.cache_dir
         )
+    elif data_args.dataset_path is not None:
+        # Load your own dataset.
+        raw_datasets = load_from_disk(data_args.dataset_path)
+        if not isinstance(raw_datasets, DatasetDict):
+            if sum([training_args.do_eval, training_args.do_train, training_args.do_predict]) > 1:
+                raise ValueError(
+                    "The provided dataset is not a DatasetDict and you asked for multiple things between [do_train, do_eval, do_predict].")
+            elif training_args.do_train:
+                raw_datasets = { "train": raw_datasets }
+            elif training_args.do_eval:
+                raw_datasets = { "valid": raw_datasets }
+            elif training_args.do_predict:
+                raw_datasets = { "test": raw_datasets }
     else:
         data_files = {}
         if data_args.train_file is not None:
